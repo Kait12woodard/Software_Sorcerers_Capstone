@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MoviesMadeEasy.DAL.Abstract;
+using MoviesMadeEasy.DAL.Concrete;
 using MoviesMadeEasy.Data;
 using MyBddProject.Tests.Mocks;
 using System.Collections.Generic;
@@ -49,11 +50,7 @@ namespace MyBddProject.Tests
                 services.AddDbContext<IdentityDbContext>(options =>
                     options.UseInMemoryDatabase("TestAuthDb"));
 
-                // Mock services
-                services.AddScoped<IMovieService, MockMovieService>();
-                services.AddScoped<IOpenAIService, MockOpenAIService>();
-
-                // Simplified password requirements for testing
+                // Configure password requirements for testing
                 services.Configure<Microsoft.AspNetCore.Identity.IdentityOptions>(options =>
                 {
                     options.Password.RequireDigit = false;
@@ -63,24 +60,21 @@ namespace MyBddProject.Tests
                     options.Password.RequiredLength = 6;
                 });
 
-                // Ensure databases are created
+                // Add mock services for API calls
+                services.AddScoped<IMovieService, MockMovieService>();
+                services.AddScoped<IOpenAIService, MockOpenAIService>();
+
+                // Use a test seeding service
                 var sp = services.BuildServiceProvider();
                 using var scope = sp.CreateScope();
                 var scopedServices = scope.ServiceProvider;
+
+                // Ensure the database is created
                 var userDb = scopedServices.GetRequiredService<UserDbContext>();
                 var identityDb = scopedServices.GetRequiredService<IdentityDbContext>();
+
                 userDb.Database.EnsureCreated();
                 identityDb.Database.EnsureCreated();
-
-                // Seed test data
-                try
-                {
-                    MoviesMadeEasy.Data.SeedData.InitializeAsync(scopedServices).GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error seeding test data: {ex.Message}");
-                }
             });
         }
     }
