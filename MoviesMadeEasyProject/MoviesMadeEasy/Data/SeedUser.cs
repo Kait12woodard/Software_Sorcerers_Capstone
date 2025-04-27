@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+﻿// Updated SeedData.cs (Create a copy in your Tests project)
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,9 +10,8 @@ namespace MoviesMadeEasy.Data
     {
         public static async Task InitializeAsync(IServiceProvider serviceProvider)
         {
-            using var scope = serviceProvider.CreateScope();
-            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
-            var dbContext = scope.ServiceProvider.GetRequiredService<UserDbContext>();
+            var userManager = serviceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            var dbContext = serviceProvider.GetRequiredService<UserDbContext>();
 
             await EnsureUserAsync(
                 "testuser@example.com",
@@ -53,7 +49,8 @@ namespace MoviesMadeEasy.Data
                 var result = await userManager.CreateAsync(aspUser, password);
                 if (!result.Succeeded)
                 {
-                    throw new Exception($"Failed to create user {email}: {string.Join(", ", result.Errors.Select(e => e.Description))}");
+                    Console.WriteLine($"Failed to create user {email}: {string.Join(", ", result.Errors.Select(e => e.Description))}");
+                    return;
                 }
             }
 
@@ -79,6 +76,18 @@ namespace MoviesMadeEasy.Data
                 var services = await dbContext.StreamingServices
                     .Where(s => defaultServices.Contains(s.Name))
                     .ToListAsync();
+
+                // Add streaming services if they don't exist
+                if (!services.Any())
+                {
+                    dbContext.StreamingServices.AddRange(
+                        new StreamingService { Name = "Hulu", Region = "US", BaseUrl = "https://auth.hulu.com/web/login", LogoUrl = "/images/hulu-Green-digital.png" },
+                        new StreamingService { Name = "Disney+", Region = "US", BaseUrl = "https://www.disneyplus.com/login", LogoUrl = "/images/disney_logo_march_2024_050fef2e.png" },
+                        new StreamingService { Name = "Netflix", Region = "US", BaseUrl = "https://www.netflix.com/login", LogoUrl = "/images/Netflix_Symbol_RGB.png" }
+                    );
+                    await dbContext.SaveChangesAsync();
+                    services = await dbContext.StreamingServices.ToListAsync();
+                }
 
                 var existingServiceIds = await dbContext.UserStreamingServices
                     .Where(us => us.UserId == customUser.Id)

@@ -1,13 +1,13 @@
-﻿using Microsoft.AspNetCore.Hosting;
+﻿// TestWebApplicationFactory.cs
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using MoviesMadeEasy.DAL.Abstract;
-using MoviesMadeEasy.DAL.Concrete;
 using MoviesMadeEasy.Data;
 using MyBddProject.Tests.Mocks;
+using System.Collections.Generic;
 
 namespace MyBddProject.Tests
 {
@@ -26,8 +26,11 @@ namespace MyBddProject.Tests
                 config.AddInMemoryCollection(inMemorySettings!);
             });
 
-            // Force a specific port to avoid random port issues
-            builder.UseUrls("http://localhost:5000");
+            // Force use of a real socket on a specific port - CRITICAL!
+            builder.UseKestrel(options => {
+                options.ListenAnyIP(5000);
+            });
+
             builder.UseEnvironment("Testing");
 
             builder.ConfigureServices(services =>
@@ -60,21 +63,25 @@ namespace MyBddProject.Tests
                     options.Password.RequiredLength = 6;
                 });
 
-                // Add mock services for API calls
+                // Mock services
                 services.AddScoped<IMovieService, MockMovieService>();
                 services.AddScoped<IOpenAIService, MockOpenAIService>();
 
-                // Use a test seeding service
+                // Initialize database with test data
                 var sp = services.BuildServiceProvider();
                 using var scope = sp.CreateScope();
                 var scopedServices = scope.ServiceProvider;
-
-                // Ensure the database is created
                 var userDb = scopedServices.GetRequiredService<UserDbContext>();
                 var identityDb = scopedServices.GetRequiredService<IdentityDbContext>();
 
+                var userManager = scopedServices.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Microsoft.AspNetCore.Identity.IdentityUser>>();
+
+                // Ensure the database is created
                 userDb.Database.EnsureCreated();
                 identityDb.Database.EnsureCreated();
+
+                // Seed test users using the same logic as SeedData
+                SeedData.InitializeAsync(scopedServices).GetAwaiter().GetResult();
             });
         }
     }
