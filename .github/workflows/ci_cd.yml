@@ -87,11 +87,12 @@ jobs:
           }
           EOL
           
-      - name: Run BDD tests
+      - name: Run BDD tests with extra diagnostic info
         env:
           ASPNETCORE_ENVIRONMENT: Testing
           GITHUB_ACTIONS: true
-        run: dotnet test MoviesMadeEasyProject/MyBddProject.Tests/MyBddProject.Tests.csproj --filter "TestCategory!=flaky" --verbosity normal
+        run: |
+          dotnet test MoviesMadeEasyProject/MyBddProject.Tests/MyBddProject.Tests.csproj --filter "TestCategory!=flaky" --verbosity detailed
 
       - name: Run frontend tests (Jest)
         run: npm run test

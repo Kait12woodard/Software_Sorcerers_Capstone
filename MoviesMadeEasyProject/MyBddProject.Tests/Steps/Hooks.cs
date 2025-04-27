@@ -3,16 +3,19 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using Reqnroll.BoDi;
 using Microsoft.Extensions.Configuration;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using MoviesMadeEasy.Data;
+using System;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Net.Http;
+using MoviesMadeEasy.DAL.Abstract;
+using MyBddProject.Tests.Mocks;
+using Microsoft.AspNetCore.Builder;
 
 namespace MyBddProject.Tests.Steps
 {
@@ -22,9 +25,9 @@ namespace MyBddProject.Tests.Steps
         private readonly IObjectContainer _objectContainer;
         private IWebDriver? _driver;
         private readonly IConfiguration _configuration;
-        private Process? _serverProcess;
         private IHost? _testHost;
-        private int _testPort = 5123;
+        private int _testPort;
+        private readonly string _baseUrl;
 
         public Hooks(IObjectContainer objectContainer)
         {
@@ -33,8 +36,8 @@ namespace MyBddProject.Tests.Steps
                 .AddJsonFile("appsettings.json")
                 .Build();
 
-            // Find an available port
             _testPort = GetAvailablePort();
+            _baseUrl = $"http://localhost:{_testPort}";
         }
 
         [BeforeTestRun]
@@ -48,58 +51,36 @@ namespace MyBddProject.Tests.Steps
         {
             try
             {
-                bool isGithubActions = Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true";
+                Console.WriteLine("Setting up test environment...");
+                StartTestServer();
 
                 // Setup Chrome options
                 var options = new ChromeOptions();
+
+                // Configure Chrome for headless environments
                 options.AddArguments("--headless", "--disable-gpu");
+                options.AddArguments("--no-sandbox", "--disable-dev-shm-usage");
+                options.AddArguments("--window-size=1920,1080");
+                options.AddArguments("--remote-allow-origins=*");
 
-                if (isGithubActions)
-                {
-                    options.AddArguments(
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--window-size=1920,1080"
-                    );
-                }
-
+                // Create and register the WebDriver
                 _driver = new ChromeDriver(options);
-                _driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(20);
-                _driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(30);
+                _driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(30);
+                _driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(45);
                 _objectContainer.RegisterInstanceAs(_driver);
 
-                if (isGithubActions)
+                // Wait for the application to be fully available
+                Console.WriteLine($"Checking application availability at {_baseUrl}");
+                bool isAvailable = WaitForAppAvailability(_baseUrl, 45);
+                if (!isAvailable)
                 {
-                    // For GitHub Actions, start a real server on a fixed port
-                    StartTestServer();
-                    var baseUrl = $"http://localhost:{_testPort}";
-                    Console.WriteLine($"Using test server URL: {baseUrl}");
-
-                    // Wait for app to start
-                    bool isAvailable = WaitForAppAvailability(baseUrl, 30);
-                    if (!isAvailable)
-                    {
-                        throw new Exception($"Application not available at {baseUrl}");
-                    }
-
-                    _driver.Navigate().GoToUrl(baseUrl);
+                    throw new Exception($"Application not available at {_baseUrl} after 45 seconds");
                 }
-                else
-                {
-                    // For local development, start via dotnet run
-                    StartApplicationServer();
 
-                    var baseUrl = _configuration["BaseUrl"] ?? "http://localhost:5000";
-                    Console.WriteLine($"Using base URL: {baseUrl}");
-
-                    bool isAvailable = WaitForAppAvailability(baseUrl, 30);
-                    if (!isAvailable)
-                    {
-                        throw new Exception($"Application not available at {baseUrl}");
-                    }
-
-                    _driver.Navigate().GoToUrl(baseUrl);
-                }
+                // Navigate to the application
+                Console.WriteLine($"Navigating to {_baseUrl}");
+                _driver.Navigate().GoToUrl(_baseUrl);
+                Console.WriteLine($"Successfully navigated to {_baseUrl}");
             }
             catch (Exception ex)
             {
@@ -112,20 +93,20 @@ namespace MyBddProject.Tests.Steps
         [AfterScenario]
         public void AfterScenario()
         {
-            if (_driver != null)
+            try
             {
-                try
+                if (_driver != null)
                 {
                     _driver.Quit();
                     _driver.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error quitting driver: {ex.Message}");
+                    _driver = null;
                 }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error during driver cleanup: {ex.Message}");
+            }
 
-            StopApplicationServer();
             StopTestServer();
         }
 
@@ -133,68 +114,57 @@ namespace MyBddProject.Tests.Steps
         {
             Console.WriteLine($"Starting test server on port {_testPort}...");
 
-            // Find the MoviesMadeEasy project root by walking up directories
-            string solutionDir = Directory.GetCurrentDirectory();
+            string rootDir = FindProjectRoot();
+            string contentRoot = Path.Combine(rootDir, "MoviesMadeEasy");
+            string wwwrootPath = Path.Combine(contentRoot, "wwwroot");
 
-            // Walk up until we find the MoviesMadeEasy directory, or hit the root
-            string moviesMadeEasyDir = Path.Combine(solutionDir, "MoviesMadeEasy");
-            int maxIterations = 5; // Safety to prevent infinite loop
-
-            while (!Directory.Exists(moviesMadeEasyDir) && maxIterations > 0)
-            {
-                solutionDir = Directory.GetParent(solutionDir)?.FullName ?? "";
-                if (string.IsNullOrEmpty(solutionDir)) break;
-
-                moviesMadeEasyDir = Path.Combine(solutionDir, "MoviesMadeEasy");
-                maxIterations--;
-            }
-
-            // In GitHub Actions, paths are different
-            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
-            {
-                string repoName = "Software_Sorcerers_Capstone";
-                string workDir = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE") ??
-                                 $"/home/runner/work/{repoName}/{repoName}";
-
-                moviesMadeEasyDir = Path.Combine(workDir, "MoviesMadeEasyProject", "MoviesMadeEasy");
-            }
-
-            if (!Directory.Exists(moviesMadeEasyDir))
-            {
-                // Fallback - try a relative path
-                moviesMadeEasyDir = Path.GetFullPath(Path.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory,
-                    "../../../../../MoviesMadeEasy"));
-            }
-
-            string wwwrootPath = Path.Combine(moviesMadeEasyDir, "wwwroot");
-
-            Console.WriteLine($"Using content root: {moviesMadeEasyDir}");
+            Console.WriteLine($"Using content root: {contentRoot}");
             Console.WriteLine($"Using wwwroot path: {wwwrootPath}");
 
-            if (!Directory.Exists(wwwrootPath))
-            {
-                Console.WriteLine("WARNING: wwwroot path not found!");
-            }
-
-            _testHost = Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
+            _testHost = Host.CreateDefaultBuilder()
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
-                    webBuilder.UseContentRoot(moviesMadeEasyDir);
-
-                    if (Directory.Exists(wwwrootPath))
-                    {
-                        webBuilder.UseWebRoot(wwwrootPath);
-                    }
-
+                    webBuilder.UseContentRoot(contentRoot);
+                    webBuilder.UseWebRoot(wwwrootPath);
                     webBuilder.UseStartup<TestStartup>();
-                    webBuilder.UseUrls($"http://localhost:{_testPort}");       
+                    webBuilder.UseUrls($"http://0.0.0.0:{_testPort}"); // Bind to all interfaces, not just localhost
+                    webBuilder.UseKestrel(options =>
+                    {
+                        options.Listen(IPAddress.Any, _testPort);
+                    });
                 })
                 .Build();
 
-            // Start the server
             _testHost.Start();
             Console.WriteLine("Test server started successfully");
+        }
+
+        private string FindProjectRoot()
+        {
+            // For GitHub Actions, paths are different
+            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+            {
+                string workDir = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE") ??
+                                "/home/runner/work/Software_Sorcerers_Capstone/Software_Sorcerers_Capstone";
+
+                return Path.Combine(workDir, "MoviesMadeEasyProject");
+            }
+
+            // For local development
+            string currentDir = Directory.GetCurrentDirectory();
+            while (!string.IsNullOrEmpty(currentDir))
+            {
+                if (Directory.Exists(Path.Combine(currentDir, "MoviesMadeEasy")))
+                {
+                    return currentDir;
+                }
+
+                var parentDir = Directory.GetParent(currentDir);
+                if (parentDir == null) break;
+                currentDir = parentDir.FullName;
+            }
+
+            throw new DirectoryNotFoundException("Could not find project root directory");
         }
 
         private void StopTestServer()
@@ -215,88 +185,56 @@ namespace MyBddProject.Tests.Steps
             }
         }
 
-        private void StartApplicationServer()
-        {
-            _serverProcess = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "dotnet",
-                    Arguments = "run --project ../../../MoviesMadeEasy/MoviesMadeEasy.csproj --environment Testing",
-                    UseShellExecute = true,
-                    CreateNoWindow = false
-                }
-            };
-            _serverProcess.Start();
-            Console.WriteLine("Started local application server process");
-        }
-
-        private void StopApplicationServer()
-        {
-            if (_serverProcess != null && !_serverProcess.HasExited)
-            {
-                try
-                {
-                    _serverProcess.Kill();
-                    _serverProcess = null;
-                    Console.WriteLine("Stopped local application server");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error stopping server: {ex.Message}");
-                }
-            }
-        }
-
         private bool WaitForAppAvailability(string url, int timeoutSeconds)
         {
-            Console.WriteLine($"Checking application availability at {url}");
-            using var client = new HttpClient();
-            client.Timeout = TimeSpan.FromSeconds(5);
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
             DateTime endTime = DateTime.Now.AddSeconds(timeoutSeconds);
-            bool isSuccess = false;
             int attempts = 0;
 
-            while (DateTime.Now < endTime && !isSuccess)
+            while (DateTime.Now < endTime)
             {
                 attempts++;
                 try
                 {
+                    Console.WriteLine($"Attempt {attempts}: Checking {url}");
                     var response = client.GetAsync(url).Result;
-                    Console.WriteLine($"Attempt {attempts}: Response {(int)response.StatusCode} {response.StatusCode}");
+                    Console.WriteLine($"Response: {(int)response.StatusCode} {response.StatusCode}");
 
-                    // For an ASP.NET Core app, even a 404 response means the server is running
-                    // We just need to check it's not a network error
-                    isSuccess = true;
+                    // Even a 404 means the server is running
+                    return true;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Attempt {attempts}: {ex.GetType().Name}");
-                    Thread.Sleep(1000);
-                }
+                    Console.WriteLine($"Attempt {attempts}: {ex.GetType().Name} - {ex.Message}");
 
-                if (!isSuccess && DateTime.Now < endTime)
-                {
+                    // Brief pause before next attempt
                     Thread.Sleep(1000);
                 }
             }
 
-            return isSuccess;
+            return false;
         }
 
         private int GetAvailablePort()
         {
-            // Create a new socket
-            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-            var port = ((IPEndPoint)socket.LocalEndPoint).Port;
-            socket.Close();
-            return port;
+            try
+            {
+                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+                var port = ((IPEndPoint)socket.LocalEndPoint!).Port;
+                socket.Close();
+                return port;
+            }
+            catch (Exception)
+            {
+                // Fallback to a fixed port if dynamic allocation fails
+                return 5555;
+            }
         }
     }
 
-    // TestStartup class for the in-memory server
+    // Updated TestStartup class
     public class TestStartup
     {
         public TestStartup(IConfiguration configuration)
@@ -319,7 +257,7 @@ namespace MyBddProject.Tests.Steps
             services.AddDbContext<IdentityDbContext>(options =>
                 options.UseInMemoryDatabase("TestAuthDb"));
 
-            // Configure identity
+            // Configure identity with simpler password requirements for testing
             services.AddDefaultIdentity<Microsoft.AspNetCore.Identity.IdentityUser>(options =>
             {
                 options.SignIn.RequireConfirmedAccount = false;
@@ -331,14 +269,18 @@ namespace MyBddProject.Tests.Steps
             })
             .AddEntityFrameworkStores<IdentityDbContext>();
 
-            // Register services to match the real application
-            services.AddScoped<MoviesMadeEasy.DAL.Abstract.IMovieService, MoviesMadeEasy.DAL.Concrete.MovieService>();
-            services.AddScoped<IOpenAIService, OpenAIService>();
-            services.AddScoped<MoviesMadeEasy.DAL.Abstract.ISubscriptionRepository, MoviesMadeEasy.DAL.Concrete.SubscriptionRepository>();
-            services.AddScoped<MoviesMadeEasy.DAL.Abstract.IUserRepository, MoviesMadeEasy.DAL.Concrete.UserRepository>();
-            services.AddScoped<MoviesMadeEasy.DAL.Abstract.ITitleRepository, MoviesMadeEasy.DAL.Concrete.TitleRepository>();
+            // Use mock services for testing
+            services.AddScoped<DbContext, UserDbContext>();
+            services.AddScoped<IMovieService, MockMovieService>();
+            services.AddScoped<IOpenAIService, MockOpenAIService>();
+            services.AddScoped<ISubscriptionRepository, MoviesMadeEasy.DAL.Concrete.SubscriptionRepository>();
+            services.AddScoped<IUserRepository, MoviesMadeEasy.DAL.Concrete.UserRepository>();
+            services.AddScoped<ITitleRepository, MoviesMadeEasy.DAL.Concrete.TitleRepository>();
 
-            // Add session 
+            // HttpClient for mock services
+            services.AddHttpClient();
+
+            // Add session support
             services.AddDistributedMemoryCache();
             services.AddSession(options =>
             {
