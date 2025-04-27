@@ -3,10 +3,7 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using Reqnroll.BoDi;
 using Microsoft.Extensions.Configuration;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Diagnostics;
-using System.Net.Http;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace MyBddProject.Tests.Steps
 {
@@ -16,9 +13,6 @@ namespace MyBddProject.Tests.Steps
         private readonly IObjectContainer _objectContainer;
         private IWebDriver? _driver;
         private readonly IConfiguration _configuration;
-        private TestWebApplicationFactory _factory = null!;
-        private IServiceScope _serviceScope = null!;
-        private HttpClient _client = null!;
         private Process? _serverProcess;
 
         public Hooks(IObjectContainer objectContainer)
@@ -40,14 +34,13 @@ namespace MyBddProject.Tests.Steps
         {
             try
             {
-                // Start the application server
-                StartApplicationServer();
+                bool isGithubActions = Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true";
 
-                // Setup ChromeDriver
+                // Setup ChromeDriver - HEADLESS MODE FOR BOTH ENVIRONMENTS
                 var options = new ChromeOptions();
                 options.AddArguments("--headless", "--disable-gpu");
 
-                if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+                if (isGithubActions)
                 {
                     options.AddArguments(
                         "--no-sandbox",
@@ -62,18 +55,37 @@ namespace MyBddProject.Tests.Steps
 
                 _objectContainer.RegisterInstanceAs(_driver);
 
-                // Get the base URL from configuration or use default
-                var baseUrl = _configuration["BaseUrl"] ?? "http://localhost:5000";
-                Console.WriteLine($"Using base URL: {baseUrl}");
-
-                // Wait for app to start
-                bool isAvailable = WaitForAppAvailability(baseUrl, 30);
-                if (!isAvailable)
+                // Different approach for GitHub Actions vs local
+                if (isGithubActions)
                 {
-                    throw new Exception($"Application not available at {baseUrl}");
-                }
+                    // For GitHub Actions, use the application factory (in-process testing)
+                    var factory = new TestWebApplicationFactory();
+                    _objectContainer.RegisterInstanceAs(factory);
+                    var client = factory.CreateClient();
 
-                _driver.Navigate().GoToUrl(baseUrl);
+                    // Use the factory client's base address
+                    var baseUrl = client.BaseAddress?.ToString() ?? "http://localhost";
+                    Console.WriteLine($"Using base URL from factory: {baseUrl}");
+                    _driver.Navigate().GoToUrl(baseUrl);
+                }
+                else
+                {
+                    // For local development, start the actual server as a process
+                    StartApplicationServer();
+
+                    // Get the base URL from configuration
+                    var baseUrl = _configuration["BaseUrl"] ?? "http://localhost:5000";
+                    Console.WriteLine($"Using base URL: {baseUrl}");
+
+                    // Wait for app to start
+                    bool isAvailable = WaitForAppAvailability(baseUrl, 30);
+                    if (!isAvailable)
+                    {
+                        throw new Exception($"Application not available at {baseUrl}");
+                    }
+
+                    _driver.Navigate().GoToUrl(baseUrl);
+                }
             }
             catch (Exception ex)
             {
@@ -99,37 +111,30 @@ namespace MyBddProject.Tests.Steps
                 }
             }
 
-            _serviceScope?.Dispose();
-            _factory?.Dispose();
             StopApplicationServer();
+
+            // Dispose the factory if it was registered
+            if (_objectContainer.IsRegistered<TestWebApplicationFactory>())
+            {
+                _objectContainer.Resolve<TestWebApplicationFactory>().Dispose();
+            }
         }
 
         private void StartApplicationServer()
         {
-            // Only use the TestWebApplicationFactory in GitHub Actions
-            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+            // Start the actual server process locally
+            _serverProcess = new Process
             {
-                _factory = new TestWebApplicationFactory();
-                _serviceScope = _factory.Services.CreateScope();
-                _client = _factory.CreateClient();
-                Console.WriteLine($"Started test server with client base address: {_client.BaseAddress}");
-            }
-            else
-            {
-                // Start the actual server process locally
-                _serverProcess = new Process
+                StartInfo = new ProcessStartInfo
                 {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "dotnet",
-                        Arguments = "run --project ../../../MoviesMadeEasy/MoviesMadeEasy.csproj --environment Testing",
-                        UseShellExecute = true,
-                        CreateNoWindow = false
-                    }
-                };
-                _serverProcess.Start();
-                Console.WriteLine("Started local application server process");
-            }
+                    FileName = "dotnet",
+                    Arguments = "run --project ../../../MoviesMadeEasy/MoviesMadeEasy.csproj --environment Testing",
+                    UseShellExecute = true,
+                    CreateNoWindow = false
+                }
+            };
+            _serverProcess.Start();
+            Console.WriteLine("Started local application server process");
         }
 
         private void StopApplicationServer()

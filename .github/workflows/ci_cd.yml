@@ -87,9 +87,10 @@ jobs:
           }
           EOL
           
-      - name: Run BDD tests (NUnit + Selenium)
+      - name: Run BDD tests
         env:
           ASPNETCORE_ENVIRONMENT: Testing
+          GITHUB_ACTIONS: true
         run: dotnet test MoviesMadeEasyProject/MyBddProject.Tests/MyBddProject.Tests.csproj --filter "TestCategory!=flaky" --verbosity normal
 
       - name: Run frontend tests (Jest)
