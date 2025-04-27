@@ -140,6 +140,8 @@ app.MapControllerRoute(
 
 app.MapRazorPages();
 
+app.Urls.Add("http://localhost:5000");
+
 app.Run();
 
 // Place namespace declaration AFTER all top-level statements

@@ -8,7 +8,6 @@ using MoviesMadeEasy.DAL.Abstract;
 using MoviesMadeEasy.DAL.Concrete;
 using MoviesMadeEasy.Data;
 using MyBddProject.Tests.Mocks;
-using System.Collections.Generic;
 
 namespace MyBddProject.Tests
 {
@@ -18,7 +17,6 @@ namespace MyBddProject.Tests
         {
             builder.ConfigureAppConfiguration(config =>
             {
-                // Add test configuration settings
                 var inMemorySettings = new Dictionary<string, string>
                 {
                     {"OpenAI_ApiKey", "sk-dummy-key-for-testing"},
@@ -28,6 +26,8 @@ namespace MyBddProject.Tests
                 config.AddInMemoryCollection(inMemorySettings!);
             });
 
+            // Force a specific port to avoid random port issues
+            builder.UseUrls("http://localhost:5000");
             builder.UseEnvironment("Testing");
 
             builder.ConfigureServices(services =>
