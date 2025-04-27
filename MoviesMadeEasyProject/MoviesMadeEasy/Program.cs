@@ -1,15 +1,13 @@
-using MoviesMadeEasy.DAL.Abstract; // Add this line
-using MoviesMadeEasy.DAL.Concrete; // Add this line
+using MoviesMadeEasy.DAL.Abstract;
+using MoviesMadeEasy.DAL.Concrete;
 using Microsoft.EntityFrameworkCore;
 using MoviesMadeEasy.Models;
 using MoviesMadeEasy.Data;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Polly;
 using Polly.Extensions.Http;
-using Microsoft.AspNetCore.Session; // Add this for session support
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +15,12 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
+
+// Check for testing environment and load test configuration if needed
+if (builder.Environment.EnvironmentName == "Testing")
+{
+    builder.Configuration.AddJsonFile("appsettings.Testing.json", optional: true);
+}
 
 if (builder.Environment.IsDevelopment())
 {
@@ -32,6 +36,7 @@ if (builder.Environment.IsDevelopment())
 else
 {
     builder.Services.AddControllersWithViews();
+    builder.Services.AddRazorPages();
 }
 
 builder.Services.AddHttpClient<IOpenAIService, OpenAIService>()
@@ -56,19 +61,24 @@ builder.Services.AddScoped<ITitleRepository, TitleRepository>();
 
 var azurePublish = !builder.Environment.IsDevelopment();
 
-var connectionString = builder.Configuration.GetConnectionString(
-    azurePublish ? "AzureConnection" : "DefaultConnection") ??
-    throw new InvalidOperationException("Connection string not found.");
+// Only use SQL Server if we're not in a testing environment
+if (builder.Environment.EnvironmentName != "Testing")
+{
+    var connectionString = builder.Configuration.GetConnectionString(
+        azurePublish ? "AzureConnection" : "DefaultConnection") ??
+        throw new InvalidOperationException("Connection string not found.");
 
-var authConnectionString = builder.Configuration.GetConnectionString(
-    azurePublish ? "AzureIdentityConnection" : "IdentityConnection") ??
-    throw new InvalidOperationException("Identity Connection string not found.");
+    var authConnectionString = builder.Configuration.GetConnectionString(
+        azurePublish ? "AzureIdentityConnection" : "IdentityConnection") ??
+        throw new InvalidOperationException("Identity Connection string not found.");
 
-builder.Services.AddDbContext<UserDbContext>(options =>
-    options.UseLazyLoadingProxies().UseSqlServer(connectionString));
+    builder.Services.AddDbContext<UserDbContext>(options =>
+        options.UseLazyLoadingProxies().UseSqlServer(connectionString));
 
-builder.Services.AddDbContext<IdentityDbContext>(options =>
-    options.UseLazyLoadingProxies().UseSqlServer(authConnectionString));
+    builder.Services.AddDbContext<IdentityDbContext>(options =>
+        options.UseLazyLoadingProxies().UseSqlServer(authConnectionString));
+}
+// For Testing environment, the test factory will provide its own DB contexts
 
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<UserDbContext>());
 
@@ -81,11 +91,11 @@ builder.Services.AddDefaultIdentity<IdentityUser>(options =>
 
 builder.Services.AddRazorPages();
 
-// **Add Session Services**
-builder.Services.AddDistributedMemoryCache(); // Add memory cache for session state
+// Add Session Services
+builder.Services.AddDistributedMemoryCache();
 builder.Services.AddSession(options =>
 {
-    options.IdleTimeout = TimeSpan.FromMinutes(30);  // Set session timeout
+    options.IdleTimeout = TimeSpan.FromMinutes(30);
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
 });
@@ -96,34 +106,31 @@ var app = builder.Build();
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-//-------------------------------------------------------------------------------
-// Seed test User: Uncomment out when running bdd tests
-//--------------------------------------------------------------------------------
-using (var scope = app.Services.CreateScope())
+
+// Skip seeding test users when running in Testing environment (handled by test setup)
+if (app.Environment.EnvironmentName != "Testing")
 {
-    var services = scope.ServiceProvider;
-    try
+    using (var scope = app.Services.CreateScope())
     {
-        await SeedData.InitializeAsync(services);
-    }
-    catch (Exception ex)
-    {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred seeding the DB.");
+        var services = scope.ServiceProvider;
+        try
+        {
+            await SeedData.InitializeAsync(services);
+        }
+        catch (Exception ex)
+        {
+            var logger = services.GetRequiredService<ILogger<Program>>();
+            logger.LogError(ex, "An error occurred seeding the DB.");
+        }
     }
 }
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
-
 app.UseRouting();
-
-// **Use Session Middleware**
-app.UseSession();  // Add this line to use session middleware
-
+app.UseSession();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -134,3 +141,9 @@ app.MapControllerRoute(
 app.MapRazorPages();
 
 app.Run();
+
+// Place namespace declaration AFTER all top-level statements
+namespace MoviesMadeEasy
+{
+    public partial class Program { }
+}

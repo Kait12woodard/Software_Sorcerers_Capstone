@@ -65,30 +65,38 @@ jobs:
           sudo chmod +x /usr/local/bin/chromedriver
           chromedriver --version
 
-      - name: Run Modified Test Setup Script
+      - name: Create appsettings.Testing.json
         run: |
-          chmod +x .github/workflows/test-setup.sh
-          .github/workflows/test-setup.sh
+          cat > MoviesMadeEasyProject/MoviesMadeEasy/appsettings.Testing.json << 'EOL'
+          {
+            "Logging": {
+              "LogLevel": {
+                "Default": "Information",
+                "Microsoft.AspNetCore": "Warning"
+              }
+            },
+            "AllowedHosts": "*",
+            "ConnectionStrings": {
+              "DefaultConnection": "DataSource=:memory:",
+              "IdentityConnection": "DataSource=:memory:"
+            },
+            "OpenAI_ApiKey": "sk-dummy-key-for-testing",
+            "TMDBApiKey": "dummy-key-for-testing",
+            "RapidApiKey": "dummy-rapid-api-key-for-testing",
+            "OpenAI_Model": "gpt-3.5-turbo"
+          }
+          EOL
           
-          # Check if test app is responding
-          echo "Checking if test app is responding..."
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000)
-          echo "Test app response code: $RESPONSE"
-          
-          # Display logs if needed
-          if [[ "$RESPONSE" != "200" ]]; then
-            echo "=== Test Application Logs ==="
-            cat ./test_output/app.log
-            echo "==========================="
-            echo "Test app failed to start properly. Exiting."
-            exit 1
-          fi
-
       - name: Run BDD tests (NUnit + Selenium)
+        env:
+          ASPNETCORE_ENVIRONMENT: Testing
         run: dotnet test MoviesMadeEasyProject/MyBddProject.Tests/MyBddProject.Tests.csproj --filter "TestCategory!=flaky" --verbosity normal
 
       - name: Run frontend tests (Jest)
         run: npm run test
+
+      - name: Publish application for deployment
+        run: dotnet publish MoviesMadeEasyProject/MoviesMadeEasy/MoviesMadeEasy.csproj --configuration Release --output ./publish_output
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4

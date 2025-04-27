@@ -3,8 +3,10 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using Reqnroll.BoDi;
 using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Mvc.Testing;
 using System.Diagnostics;
 using System.Net.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MyBddProject.Tests.Steps
 {
@@ -14,6 +16,9 @@ namespace MyBddProject.Tests.Steps
         private readonly IObjectContainer _objectContainer;
         private IWebDriver? _driver;
         private readonly IConfiguration _configuration;
+        private TestWebApplicationFactory _factory = null!;
+        private IServiceScope _serviceScope = null!;
+        private HttpClient _client = null!;
         private Process? _serverProcess;
 
         public Hooks(IObjectContainer objectContainer)
@@ -24,27 +29,24 @@ namespace MyBddProject.Tests.Steps
                 .Build();
         }
 
+        [BeforeTestRun]
+        public static void BeforeTestRun()
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
+        }
+
         [BeforeScenario]
         public void BeforeScenario()
         {
             try
             {
-                // Only start the server locally
-                if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true")
-                {
-                    StartApplicationServer();
-                }
-                else
-                {
-                    Console.WriteLine("Running in GitHub Actions - using workflow-started app server");
-                }
+                // Start the application server
+                StartApplicationServer();
 
+                // Setup ChromeDriver
                 var options = new ChromeOptions();
-
-                // Basic options for headless testing
                 options.AddArguments("--headless", "--disable-gpu");
 
-                // Add GitHub Actions specific options
                 if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
                 {
                     options.AddArguments(
@@ -54,23 +56,18 @@ namespace MyBddProject.Tests.Steps
                     );
                 }
 
-                // Create ChromeDriver with appropriate settings
                 _driver = new ChromeDriver(options);
-
-                // Set longer timeouts for GitHub Actions
-                if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
-                {
-                    _driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(20);
-                    _driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(30);
-                }
+                _driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(20);
+                _driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(30);
 
                 _objectContainer.RegisterInstanceAs(_driver);
 
-                // Wait for app to be available
+                // Get the base URL from configuration or use default
                 var baseUrl = _configuration["BaseUrl"] ?? "http://localhost:5000";
-                bool isAvailable = WaitForAppAvailability(baseUrl,
-                    Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" ? 60 : 30);
+                Console.WriteLine($"Using base URL: {baseUrl}");
 
+                // Wait for app to start
+                bool isAvailable = WaitForAppAvailability(baseUrl, 30);
                 if (!isAvailable)
                 {
                     throw new Exception($"Application not available at {baseUrl}");
@@ -102,9 +99,53 @@ namespace MyBddProject.Tests.Steps
                 }
             }
 
-            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true")
+            _serviceScope?.Dispose();
+            _factory?.Dispose();
+            StopApplicationServer();
+        }
+
+        private void StartApplicationServer()
+        {
+            // Only use the TestWebApplicationFactory in GitHub Actions
+            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
             {
-                StopApplicationServer();
+                _factory = new TestWebApplicationFactory();
+                _serviceScope = _factory.Services.CreateScope();
+                _client = _factory.CreateClient();
+                Console.WriteLine($"Started test server with client base address: {_client.BaseAddress}");
+            }
+            else
+            {
+                // Start the actual server process locally
+                _serverProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "dotnet",
+                        Arguments = "run --project ../../../MoviesMadeEasy/MoviesMadeEasy.csproj --environment Testing",
+                        UseShellExecute = true,
+                        CreateNoWindow = false
+                    }
+                };
+                _serverProcess.Start();
+                Console.WriteLine("Started local application server process");
+            }
+        }
+
+        private void StopApplicationServer()
+        {
+            if (_serverProcess != null && !_serverProcess.HasExited)
+            {
+                try
+                {
+                    _serverProcess.Kill();
+                    _serverProcess = null;
+                    Console.WriteLine("Stopped local application server");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error stopping server: {ex.Message}");
+                }
             }
         }
 
@@ -140,46 +181,6 @@ namespace MyBddProject.Tests.Steps
             }
 
             return isSuccess;
-        }
-
-        private void StartApplicationServer()
-        {
-            try
-            {
-                _serverProcess = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "dotnet",
-                        Arguments = "run --project ../../../MoviesMadeEasyProject/MoviesMadeEasy/MoviesMadeEasy.csproj",
-                        UseShellExecute = true,
-                        CreateNoWindow = false
-                    }
-                };
-                _serverProcess.Start();
-                Console.WriteLine("Started application server locally");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to start application server: {ex.Message}");
-            }
-        }
-
-        private void StopApplicationServer()
-        {
-            try
-            {
-                if (_serverProcess != null && !_serverProcess.HasExited)
-                {
-                    _serverProcess.Kill();
-                    _serverProcess = null;
-                    Console.WriteLine("Stopped local application server");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error stopping server: {ex.Message}");
-            }
         }
     }
 }

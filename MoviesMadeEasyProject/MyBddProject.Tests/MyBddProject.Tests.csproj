@@ -1,48 +1,48 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
-    <IsTestProject>true</IsTestProject>
-    <GenerateReqnrollCodeBehindFiles>true</GenerateReqnrollCodeBehindFiles>
-  </PropertyGroup>
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+		<IsTestProject>true</IsTestProject>
+		<GenerateReqnrollCodeBehindFiles>true</GenerateReqnrollCodeBehindFiles>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
-    <PackageReference Include="NUnit" Version="3.14.0" />
-    <PackageReference Include="NUnit.Analyzers" Version="3.9.0" />
-    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
-    <PackageReference Include="Reqnroll" Version="2.4.0" />
-    <PackageReference Include="Reqnroll.NUnit" Version="2.4.0" />
-    <PackageReference Include="Reqnroll.Tools.MsBuild.Generation" Version="2.4.0" />
-    <PackageReference Include="Selenium.WebDriver" Version="4.16.2" />
-    <PackageReference Include="Selenium.WebDriver.ChromeDriver" Version="135.0.7049.8400" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="coverlet.collector" Version="6.0.0" />
+		<!-- Match versions with the main project to avoid downgrade errors -->
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.15" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.4" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+		<PackageReference Include="Moq" Version="4.20.72" />
+		<PackageReference Include="NUnit" Version="3.14.0" />
+		<PackageReference Include="NUnit.Analyzers" Version="3.9.0" />
+		<PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+		<PackageReference Include="Reqnroll" Version="2.4.0" />
+		<PackageReference Include="Reqnroll.NUnit" Version="2.4.0" />
+		<PackageReference Include="Reqnroll.Tools.MsBuild.Generation" Version="2.4.0" />
+		<PackageReference Include="Selenium.WebDriver" Version="4.16.2" />
+		<PackageReference Include="Selenium.WebDriver.ChromeDriver" Version="135.0.7049.8400" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <None Update="appsettings.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="reqnroll.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\MoviesMadeEasy\MoviesMadeEasy.csproj" />
+	</ItemGroup>
 
+	<ItemGroup>
+		<None Update="appsettings.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+		<None Update="reqnroll.json">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
 
-  <ItemGroup>
-  <None Update="Features\**\*.feature">
-    <Generator>ReqnrollSingleFileGenerator</Generator>
-    <LastGenOutput>%(Filename).feature.cs</LastGenOutput>
-  </None>
-</ItemGroup>
-
-
-  <ItemGroup>
-    <ReqnrollFeatureFiles Update="Features\SSC124_ModalRecentlyViewedTitle.feature">
-      <Generator Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">ReqnrollSingleFileGenerator</Generator>
-    </ReqnrollFeatureFiles>
-  </ItemGroup>
+	<ItemGroup>
+		<None Update="Features\**\*.feature">
+			<Generator>ReqnrollSingleFileGenerator</Generator>
+			<LastGenOutput>%(Filename).feature.cs</LastGenOutput>
+		</None>
+	</ItemGroup>
 </Project>
