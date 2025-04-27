@@ -58,15 +58,15 @@ namespace MyBddProject.Tests.Steps
                 // Different approach for GitHub Actions vs local
                 if (isGithubActions)
                 {
-                    // For GitHub Actions, use the in-memory test server
-                    TestWebApplicationFactory factory = new TestWebApplicationFactory();
+                    // For GitHub Actions, use the application factory (in-process testing)
+                    var factory = new TestWebApplicationFactory();
                     _objectContainer.RegisterInstanceAs(factory);
+                    var client = factory.CreateClient();
 
-                    // The TestWebApplicationFactory's CreateDefaultClient creates a client with
-                    // the correct base address, but we need to explicitly use localhost with a port
-                    string testServerUrl = "http://localhost:5000";
-                    Console.WriteLine($"Using test server URL: {testServerUrl}");
-                    _driver.Navigate().GoToUrl(testServerUrl);
+                    // Use the factory client's base address
+                    var baseUrl = client.BaseAddress?.ToString() ?? "http://localhost";
+                    Console.WriteLine($"Using base URL from factory: {baseUrl}");
+                    _driver.Navigate().GoToUrl(baseUrl);
                 }
                 else
                 {
