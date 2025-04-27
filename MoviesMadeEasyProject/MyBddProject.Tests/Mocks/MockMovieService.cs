@@ -1,66 +1,104 @@
 ﻿using MoviesMadeEasy.DAL.Abstract;
 using MoviesMadeEasy.Models;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
-namespace MyBddProject.Tests.Mocks
+namespace MyBddProject.Tests.Mocks;
+
+public class MockMovieService : IMovieService
 {
-    public class MockMovieService : IMovieService
+    public Task<List<Movie>> SearchMoviesAsync(string query)
     {
-        public Task<List<MoviesMadeEasy.Models.Movie>> SearchMoviesAsync(string query)
+        var movies = new List<Movie>();
+
+        // Create standardized response for tests
+        if (query?.Contains("Hunger Games", StringComparison.OrdinalIgnoreCase) == true)
         {
-            var movies = new List<MoviesMadeEasy.Models.Movie>();
-
-            if (query?.Contains("Hunger Games", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                movies.Add(new MoviesMadeEasy.Models.Movie
-                {
-                    Title = "The Hunger Games",
-                    ReleaseYear = 2012,
-                    ImageSet = new MoviesMadeEasy.Models.ImageSet
-                    {
-                        VerticalPoster = new MoviesMadeEasy.Models.VerticalPoster
-                        {
-                            W240 = "https://example.com/hunger-games.jpg"
-                        }
-                    },
-                    Genres = new List<MoviesMadeEasy.Models.Genre>
-                    {
-                        new MoviesMadeEasy.Models.Genre { Name = "Action" },
-                        new MoviesMadeEasy.Models.Genre { Name = "Adventure" },
-                        new MoviesMadeEasy.Models.Genre { Name = "Sci-Fi" }
-                    },
-                    Rating = 72,
-                    Overview = "Katniss Everdeen voluntarily takes her younger sister's place in the Hunger Games.",
-                    StreamingOptions = new Dictionary<string, List<MoviesMadeEasy.Models.StreamingOption>>
-                    {
-                        {
-                            "us", new List<MoviesMadeEasy.Models.StreamingOption>
-                            {
-                                CreateStreamingOption("Netflix"),
-                                CreateStreamingOption("Apple TV"),
-                                CreateStreamingOption("Prime Video")
-                            }
-                        }
-                    }
-                });
-            }
-
-            return Task.FromResult(movies);
+            movies.Add(CreateHungerGamesMovie());
+        }
+        else if (!string.IsNullOrEmpty(query))
+        {
+            // Generic movie for any other query
+            movies.Add(CreateGenericMovie(query));
         }
 
-        private MoviesMadeEasy.Models.StreamingOption CreateStreamingOption(string serviceName)
+        return Task.FromResult(movies);
+    }
+
+    private Movie CreateHungerGamesMovie()
+    {
+        return new Movie
         {
-            return new MoviesMadeEasy.Models.StreamingOption
+            Title = "The Hunger Games",
+            ReleaseYear = 2012,
+            ImageSet = new ImageSet
             {
-                Service = new MoviesMadeEasy.Models.Service
+                VerticalPoster = new VerticalPoster
                 {
-                    Name = serviceName,
-                    Id = serviceName.ToLower().Replace(" ", "-")
+                    W240 = "https://example.com/hunger-games.jpg"
                 }
-            };
-        }
+            },
+            Genres = new List<Genre>
+            {
+                new Genre { Id = "1", Name = "Action" },
+                new Genre { Id = "2", Name = "Adventure" },
+                new Genre { Id = "3", Name = "Sci-Fi" }
+            },
+            Rating = 72,
+            Overview = "Katniss Everdeen volunteers as tribute to participate in a fight to the death.",
+            StreamingOptions = new Dictionary<string, List<StreamingOption>>
+            {
+                {
+                    "us", new List<StreamingOption>
+                    {
+                        CreateStreamingOption("Netflix"),
+                        CreateStreamingOption("Apple TV"),
+                        CreateStreamingOption("Prime Video")
+                    }
+                }
+            }
+        };
+    }
+
+    private Movie CreateGenericMovie(string title)
+    {
+        return new Movie
+        {
+            Title = title,
+            ReleaseYear = 2023,
+            ImageSet = new ImageSet
+            {
+                VerticalPoster = new VerticalPoster
+                {
+                    W240 = "https://example.com/generic-movie.jpg"
+                }
+            },
+            Genres = new List<Genre>
+            {
+                new Genre { Id = "1", Name = "Action" }
+            },
+            Rating = 65,
+            Overview = $"A movie about {title}.",
+            StreamingOptions = new Dictionary<string, List<StreamingOption>>
+            {
+                {
+                    "us", new List<StreamingOption>
+                    {
+                        CreateStreamingOption("Netflix")
+                    }
+                }
+            }
+        };
+    }
+
+    private StreamingOption CreateStreamingOption(string serviceName)
+    {
+        return new StreamingOption
+        {
+            Service = new Service
+            {
+                Name = serviceName,
+                Id = serviceName.ToLower().Replace(" ", "-")
+            },
+            Link = $"https://{serviceName.ToLower().Replace(" ", "")}.com"
+        };
     }
 }
