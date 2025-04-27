@@ -12,8 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using MoviesMadeEasy.Data;
-using MyBddProject.Tests.Mocks;
-using MoviesMadeEasy.DAL;
+using System.IO;
 
 namespace MyBddProject.Tests.Steps
 {
@@ -134,11 +133,62 @@ namespace MyBddProject.Tests.Steps
         {
             Console.WriteLine($"Starting test server on port {_testPort}...");
 
+            // Find the MoviesMadeEasy project root by walking up directories
+            string solutionDir = Directory.GetCurrentDirectory();
+
+            // Walk up until we find the MoviesMadeEasy directory, or hit the root
+            string moviesMadeEasyDir = Path.Combine(solutionDir, "MoviesMadeEasy");
+            int maxIterations = 5; // Safety to prevent infinite loop
+
+            while (!Directory.Exists(moviesMadeEasyDir) && maxIterations > 0)
+            {
+                solutionDir = Directory.GetParent(solutionDir)?.FullName ?? "";
+                if (string.IsNullOrEmpty(solutionDir)) break;
+
+                moviesMadeEasyDir = Path.Combine(solutionDir, "MoviesMadeEasy");
+                maxIterations--;
+            }
+
+            // In GitHub Actions, paths are different
+            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+            {
+                string repoName = "Software_Sorcerers_Capstone";
+                string workDir = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE") ??
+                                 $"/home/runner/work/{repoName}/{repoName}";
+
+                moviesMadeEasyDir = Path.Combine(workDir, "MoviesMadeEasyProject", "MoviesMadeEasy");
+            }
+
+            if (!Directory.Exists(moviesMadeEasyDir))
+            {
+                // Fallback - try a relative path
+                moviesMadeEasyDir = Path.GetFullPath(Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    "../../../../../MoviesMadeEasy"));
+            }
+
+            string wwwrootPath = Path.Combine(moviesMadeEasyDir, "wwwroot");
+
+            Console.WriteLine($"Using content root: {moviesMadeEasyDir}");
+            Console.WriteLine($"Using wwwroot path: {wwwrootPath}");
+
+            if (!Directory.Exists(wwwrootPath))
+            {
+                Console.WriteLine("WARNING: wwwroot path not found!");
+            }
+
             _testHost = Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
+                    webBuilder.UseContentRoot(moviesMadeEasyDir);
+
+                    if (Directory.Exists(wwwrootPath))
+                    {
+                        webBuilder.UseWebRoot(wwwrootPath);
+                    }
+
                     webBuilder.UseStartup<TestStartup>();
-                    webBuilder.UseUrls($"http://localhost:{_testPort}");
+                    webBuilder.UseUrls($"http://localhost:{_testPort}");       
                 })
                 .Build();
 
@@ -215,7 +265,10 @@ namespace MyBddProject.Tests.Steps
                 {
                     var response = client.GetAsync(url).Result;
                     Console.WriteLine($"Attempt {attempts}: Response {(int)response.StatusCode} {response.StatusCode}");
-                    isSuccess = response.IsSuccessStatusCode;
+
+                    // For an ASP.NET Core app, even a 404 response means the server is running
+                    // We just need to check it's not a network error
+                    isSuccess = true;
                 }
                 catch (Exception ex)
                 {
@@ -243,7 +296,7 @@ namespace MyBddProject.Tests.Steps
         }
     }
 
-    // Add a TestStartup class to configure the test server
+    // TestStartup class for the in-memory server
     public class TestStartup
     {
         public TestStartup(IConfiguration configuration)
@@ -255,18 +308,18 @@ namespace MyBddProject.Tests.Steps
 
         public void ConfigureServices(IServiceCollection services)
         {
-            // Configure services similar to TestWebApplicationFactory
+            // Basic services
             services.AddControllersWithViews();
             services.AddRazorPages();
 
-            // Add in-memory database context
+            // Add in-memory database contexts
             services.AddDbContext<UserDbContext>(options =>
                 options.UseInMemoryDatabase("TestDb"));
 
             services.AddDbContext<IdentityDbContext>(options =>
                 options.UseInMemoryDatabase("TestAuthDb"));
 
-            // Add identity
+            // Configure identity
             services.AddDefaultIdentity<Microsoft.AspNetCore.Identity.IdentityUser>(options =>
             {
                 options.SignIn.RequireConfirmedAccount = false;
@@ -278,25 +331,29 @@ namespace MyBddProject.Tests.Steps
             })
             .AddEntityFrameworkStores<IdentityDbContext>();
 
-            // Add mock services
-            services.AddScoped<MoviesMadeEasy.DAL.Abstract.IMovieService, MockMovieService>();
-            // Use direct registration without the interface to avoid namespace issues
-            services.AddScoped(typeof(MoviesMadeEasy.DAL.Abstract.ISubscriptionRepository), typeof(MoviesMadeEasy.DAL.Concrete.SubscriptionRepository));
-            services.AddScoped(typeof(MoviesMadeEasy.DAL.Abstract.IUserRepository), typeof(MoviesMadeEasy.DAL.Concrete.UserRepository));
-            services.AddScoped(typeof(MoviesMadeEasy.DAL.Abstract.ITitleRepository), typeof(MoviesMadeEasy.DAL.Concrete.TitleRepository));
+            // Register services to match the real application
+            services.AddScoped<MoviesMadeEasy.DAL.Abstract.IMovieService, MoviesMadeEasy.DAL.Concrete.MovieService>();
+            services.AddScoped<IOpenAIService, OpenAIService>();
+            services.AddScoped<MoviesMadeEasy.DAL.Abstract.ISubscriptionRepository, MoviesMadeEasy.DAL.Concrete.SubscriptionRepository>();
+            services.AddScoped<MoviesMadeEasy.DAL.Abstract.IUserRepository, MoviesMadeEasy.DAL.Concrete.UserRepository>();
+            services.AddScoped<MoviesMadeEasy.DAL.Abstract.ITitleRepository, MoviesMadeEasy.DAL.Concrete.TitleRepository>();
 
-            // Register OpenAIService manually to avoid namespace issues
-            services.AddScoped<OpenAIService>();
-            services.AddScoped(provider => (IOpenAIService)provider.GetService<OpenAIService>());
-
-            services.AddSession();
+            // Add session 
+            services.AddDistributedMemoryCache();
+            services.AddSession(options =>
+            {
+                options.IdleTimeout = TimeSpan.FromMinutes(30);
+                options.Cookie.HttpOnly = true;
+                options.Cookie.IsEssential = true;
+            });
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
-            // Standard app configuration
+            // Enable developer exception page
             app.UseDeveloperExceptionPage();
-            app.UseHttpsRedirection();
+
+            // Basic middleware pipeline
             app.UseStaticFiles();
             app.UseRouting();
             app.UseAuthentication();
@@ -317,6 +374,7 @@ namespace MyBddProject.Tests.Steps
             try
             {
                 MoviesMadeEasy.Data.SeedData.InitializeAsync(services).GetAwaiter().GetResult();
+                Console.WriteLine("Test data seeded successfully.");
             }
             catch (Exception ex)
             {
