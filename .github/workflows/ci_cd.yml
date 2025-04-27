@@ -30,6 +30,14 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
       - name: Restore .NET dependencies
         run: dotnet restore MoviesMadeEasyProject/MoviesMadeEasy/MoviesMadeEasy.csproj
 
@@ -79,12 +87,15 @@ jobs:
           }
           EOL
           
-      - name: Run BDD tests
+      - name: Run BDD tests with extra diagnostic info
         env:
           ASPNETCORE_ENVIRONMENT: Testing
           GITHUB_ACTIONS: true
         run: |
-          dotnet test MoviesMadeEasyProject/MyBddProject.Tests/MyBddProject.Tests.csproj --filter "TestCategory!=flaky" --verbosity normal
+          dotnet test MoviesMadeEasyProject/MyBddProject.Tests/MyBddProject.Tests.csproj --filter "TestCategory!=flaky" --verbosity detailed
+
+      - name: Run frontend tests (Jest)
+        run: npm run test
 
       - name: Publish application for deployment
         run: dotnet publish MoviesMadeEasyProject/MoviesMadeEasy/MoviesMadeEasy.csproj --configuration Release --output ./publish_output
